@@ -261,22 +261,34 @@ echo ""
 # ============================================================
 echo -e "${YELLOW}Step 5: Saving to .env file${NC}"
 ENV_FILE=".env"
+ENV_EXAMPLE=".env.example"
 
-# Check if .env exists and backup if needed
+# Check if .env exists
 if [ -f "$ENV_FILE" ]; then
-    # Check if GCLOUD_PROJECT_ID already exists
-    if grep -q "^GCLOUD_PROJECT_ID=" "$ENV_FILE"; then
+    # .env exists - update or append GOOGLE_CLOUD_PROJECT
+    if grep -q "^GOOGLE_CLOUD_PROJECT=" "$ENV_FILE"; then
         # Update existing value
-        sed -i "s/^GCLOUD_PROJECT_ID=.*/GCLOUD_PROJECT_ID=${PROJECT_ID}/" "$ENV_FILE"
-        echo -e "Updated GCLOUD_PROJECT_ID in existing ${ENV_FILE}"
+        sed -i "s/^GOOGLE_CLOUD_PROJECT=.*/GOOGLE_CLOUD_PROJECT=${PROJECT_ID}/" "$ENV_FILE"
+        echo -e "Updated GOOGLE_CLOUD_PROJECT in existing ${ENV_FILE}"
     else
         # Append to existing file
-        echo "GCLOUD_PROJECT_ID=${PROJECT_ID}" >> "$ENV_FILE"
-        echo -e "Appended GCLOUD_PROJECT_ID to existing ${ENV_FILE}"
+        echo "GOOGLE_CLOUD_PROJECT=${PROJECT_ID}" >> "$ENV_FILE"
+        echo -e "Appended GOOGLE_CLOUD_PROJECT to existing ${ENV_FILE}"
     fi
+elif [ -f "$ENV_EXAMPLE" ]; then
+    # .env doesn't exist but .env.example does - use it as template
+    echo -e "Using ${ENV_EXAMPLE} as template..."
+    cp "$ENV_EXAMPLE" "$ENV_FILE"
+    # Update the project ID in the copied file
+    if grep -q "^GOOGLE_CLOUD_PROJECT=" "$ENV_FILE"; then
+        sed -i "s/^GOOGLE_CLOUD_PROJECT=.*/GOOGLE_CLOUD_PROJECT=${PROJECT_ID}/" "$ENV_FILE"
+    else
+        echo "GOOGLE_CLOUD_PROJECT=${PROJECT_ID}" >> "$ENV_FILE"
+    fi
+    echo -e "Created ${ENV_FILE} from ${ENV_EXAMPLE} template"
 else
-    # Create new .env file
-    echo "GCLOUD_PROJECT_ID=${PROJECT_ID}" > "$ENV_FILE"
+    # Neither .env nor .env.example exists - create new .env file
+    echo "GOOGLE_CLOUD_PROJECT=${PROJECT_ID}" > "$ENV_FILE"
     echo -e "Created new ${ENV_FILE}"
 fi
 
