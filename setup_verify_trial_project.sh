@@ -272,7 +272,7 @@ if [ -f "$ENV_FILE" ]; then
         echo -e "Updated GOOGLE_CLOUD_PROJECT in existing ${ENV_FILE}"
     else
         # Append to existing file
-        echo "GOOGLE_CLOUD_PROJECT=${PROJECT_ID}" >> "$ENV_FILE"
+        echo -e "\nGOOGLE_CLOUD_PROJECT=${PROJECT_ID}" >> "$ENV_FILE"
         echo -e "Appended GOOGLE_CLOUD_PROJECT to existing ${ENV_FILE}"
     fi
 elif [ -f "$ENV_EXAMPLE" ]; then
@@ -283,7 +283,7 @@ elif [ -f "$ENV_EXAMPLE" ]; then
     if grep -q "^GOOGLE_CLOUD_PROJECT=" "$ENV_FILE"; then
         sed -i "s/^GOOGLE_CLOUD_PROJECT=.*/GOOGLE_CLOUD_PROJECT=${PROJECT_ID}/" "$ENV_FILE"
     else
-        echo "GOOGLE_CLOUD_PROJECT=${PROJECT_ID}" >> "$ENV_FILE"
+        echo -e "\nGOOGLE_CLOUD_PROJECT=${PROJECT_ID}" >> "$ENV_FILE"
     fi
     echo -e "Created ${ENV_FILE} from ${ENV_EXAMPLE} template"
 else
