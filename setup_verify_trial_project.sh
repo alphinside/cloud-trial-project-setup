@@ -19,11 +19,12 @@
 # ============================================================
 # This script helps workshop participants:
 # 1. Check if a project already exists in .env (safeguard)
-# 2. Validate existing project has active billing linked
+# 2. List projects with active billing and recommend to user
 # 3. Verify trial billing account exists (only if creating new project)
 # 4. Create a new GCP project if needed
 # 5. Link trial billing account automatically
-# 6. Save the project ID to .env file
+# 6. Set as default project
+# 7. Save the project ID to .env file
 # ============================================================
 
 set -e
@@ -153,11 +154,123 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 # ============================================================
-# Step 2: Check for Trial Billing Account (only if creating new project)
+# Step 2: List projects with active billing (recommend existing)
+# ============================================================
+echo -e "${YELLOW}Step 2: Checking for existing projects with active billing${NC}"
+echo -e "Searching for projects you can reuse...\n"
+
+PROJECTS_WITH_BILLING=()
+PROJECTS_BILLING_NAMES=()
+
+if [[ "$ACTIVE_ACCOUNT" == *"@gcplab.me" ]]; then
+    # gcplab.me users may lack billing list permission — list projects directly
+    GCPLAB_PROJECTS=$(gcloud projects list --format="value(projectId)" 2>/dev/null)
+    while IFS= read -r proj_id; do
+        if [ -n "$proj_id" ]; then
+            PROJECTS_WITH_BILLING+=("$proj_id")
+            PROJECTS_BILLING_NAMES+=("gcplab")
+        fi
+    done <<< "$GCPLAB_PROJECTS"
+else
+    # Get all active billing accounts and find their linked projects
+    ACTIVE_BILLING=$(gcloud billing accounts list --filter="open=true" --format="csv[no-heading](ACCOUNT_ID,NAME)" 2>/dev/null)
+
+    if [ -n "$ACTIVE_BILLING" ]; then
+        while IFS=',' read -r ba_id ba_name; do
+            [ -z "$ba_id" ] && continue
+            LINKED=$(gcloud billing projects list --billing-account="$ba_id" --format="value(projectId)" 2>/dev/null)
+            while IFS= read -r proj_id; do
+                if [ -n "$proj_id" ]; then
+                    PROJECTS_WITH_BILLING+=("$proj_id")
+                    PROJECTS_BILLING_NAMES+=("$ba_name")
+                fi
+            done <<< "$LINKED"
+        done <<< "$ACTIVE_BILLING"
+    fi
+fi
+
+if [ ${#PROJECTS_WITH_BILLING[@]} -gt 0 ]; then
+    echo -e "Found ${GREEN}${#PROJECTS_WITH_BILLING[@]}${NC} project(s) with active billing:"
+    echo "-------------------------------------------"
+    for i in "${!PROJECTS_WITH_BILLING[@]}"; do
+        echo -e "  ${GREEN}[$((i+1))]${NC} ${PROJECTS_WITH_BILLING[$i]}"
+        echo -e "       Billing: ${PROJECTS_BILLING_NAMES[$i]}"
+    done
+    echo "-------------------------------------------"
+    echo ""
+
+    SELECTED_PROJECT=""
+
+    # Auto-select first project for @gcplab.me users
+    if [[ "$ACTIVE_ACCOUNT" == *"@gcplab.me" ]]; then
+        SELECTED_PROJECT="${PROJECTS_WITH_BILLING[0]}"
+        echo -e "${GREEN}✓ Detected gcplab.me account — auto-selecting: ${SELECTED_PROJECT}${NC}"
+    else
+        echo -e "You can reuse one of these projects instead of creating a new one."
+        read -p "Enter number to select (or press Enter to skip and use trial billing): " PROJ_SELECTION
+
+        if [ -n "$PROJ_SELECTION" ] && [ "$PROJ_SELECTION" -ge 1 ] 2>/dev/null && [ "$PROJ_SELECTION" -le ${#PROJECTS_WITH_BILLING[@]} ] 2>/dev/null; then
+            SELECTED_PROJECT="${PROJECTS_WITH_BILLING[$((PROJ_SELECTION-1))]}"
+        else
+            echo -e "\nSkipping. Will proceed with trial billing setup.\n"
+        fi
+    fi
+
+    if [ -n "$SELECTED_PROJECT" ]; then
+        echo ""
+        echo -e "${GREEN}✓ Selected project: ${SELECTED_PROJECT}${NC}"
+
+        # Activate project
+        echo -e "Activating project..."
+        gcloud config set project "$SELECTED_PROJECT"
+        echo -e "${GREEN}✓ Project activated: ${SELECTED_PROJECT}${NC}"
+        echo ""
+
+        # Save to .env
+        ENV_FILE=".env"
+        ENV_EXAMPLE=".env.example"
+        if [ -f "$ENV_FILE" ]; then
+            if grep -q "^GOOGLE_CLOUD_PROJECT=" "$ENV_FILE"; then
+                sed -i "s/^GOOGLE_CLOUD_PROJECT=.*/GOOGLE_CLOUD_PROJECT=${SELECTED_PROJECT}/" "$ENV_FILE"
+            else
+                echo "GOOGLE_CLOUD_PROJECT=${SELECTED_PROJECT}" >> "$ENV_FILE"
+            fi
+        elif [ -f "$ENV_EXAMPLE" ]; then
+            cp "$ENV_EXAMPLE" "$ENV_FILE"
+            if grep -q "^GOOGLE_CLOUD_PROJECT=" "$ENV_FILE"; then
+                sed -i "s/^GOOGLE_CLOUD_PROJECT=.*/GOOGLE_CLOUD_PROJECT=${SELECTED_PROJECT}/" "$ENV_FILE"
+            else
+                echo "GOOGLE_CLOUD_PROJECT=${SELECTED_PROJECT}" >> "$ENV_FILE"
+            fi
+        else
+            echo "GOOGLE_CLOUD_PROJECT=${SELECTED_PROJECT}" > "$ENV_FILE"
+        fi
+        echo -e "${GREEN}✓ Project ID saved to .env file!${NC}"
+        echo ""
+
+        echo -e "${BLUE}============================================${NC}"
+        echo -e "${GREEN}  Setup Complete! ✓${NC}"
+        echo -e "${BLUE}============================================${NC}"
+        echo -e "  Project ID:      ${GREEN}${SELECTED_PROJECT}${NC}"
+        echo -e "  Billing:         ${GREEN}Active${NC}"
+        echo -e "  Environment:     ${GREEN}.env${NC}"
+        echo -e "${BLUE}============================================${NC}"
+        echo ""
+        echo -e "You can now proceed with the workshop!"
+        echo -e "To verify, run: ${YELLOW}gcloud config get-value project${NC}"
+        exit 0
+    fi
+else
+    echo -e "No existing projects with active billing found."
+    echo -e "Proceeding with trial billing setup.\n"
+fi
+
+# ============================================================
+# Step 3: Check for Trial Billing Account (only if creating new project)
 # ============================================================
 # Skip this check if we already validated an existing project
 if [ "$SKIP_PROJECT_CREATION" != "true" ] && [ -z "$EXISTING_PROJECT" ]; then
-    echo -e "${YELLOW}Step 2: Checking for Trial Billing Account${NC}"
+    echo -e "${YELLOW}Step 3: Checking for Trial Billing Account${NC}"
     echo -e "Searching for trial billing accounts...\n"
 
     # Get all billing accounts
@@ -217,11 +330,11 @@ if [ "$SKIP_PROJECT_CREATION" != "true" ] && [ -z "$EXISTING_PROJECT" ]; then
 fi
 
 # ============================================================
-# Step 3: Create a new GCP Project (skip if linking billing to existing project)
+# Step 4: Create a new GCP Project (skip if linking billing to existing project)
 # ============================================================
 if [ "$SKIP_PROJECT_CREATION" != "true" ]; then
     DEFAULT_PROJECT_ID="workshop-$(head -c 6 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-    echo -e "${YELLOW}Step 3: Create a new GCP Project${NC}"
+    echo -e "${YELLOW}Step 4: Create a new GCP Project${NC}"
     echo -e "Suggested project ID: ${GREEN}${DEFAULT_PROJECT_ID}${NC}"
     read -p "Enter project ID (press Enter for suggested): " PROJECT_ID
     PROJECT_ID=${PROJECT_ID:-$DEFAULT_PROJECT_ID}
@@ -247,16 +360,16 @@ if [ "$SKIP_PROJECT_CREATION" != "true" ]; then
     echo -e "${GREEN}✓ Project created successfully!${NC}"
     echo ""
 else
-    echo -e "${YELLOW}Step 3: Using existing project${NC}"
+    echo -e "${YELLOW}Step 4: Using existing project${NC}"
     echo -e "Project ID: ${GREEN}${PROJECT_ID}${NC}"
     echo -e "${GREEN}✓ Skipping project creation${NC}"
     echo ""
 fi
 
 # ============================================================
-# Step 4: Link Trial Billing Account to Project
+# Step 5: Link Trial Billing Account to Project
 # ============================================================
-echo -e "${YELLOW}Step 4: Link Trial Billing Account${NC}"
+echo -e "${YELLOW}Step 5: Link Trial Billing Account${NC}"
 echo -e "Linking billing account to project..."
 gcloud billing projects link "$PROJECT_ID" --billing-account="$SELECTED_ACCOUNT"
 
@@ -269,17 +382,17 @@ echo -e "${GREEN}✓ Billing account linked successfully!${NC}"
 echo ""
 
 # ============================================================
-# Step 5: Set as default project
+# Step 6: Set as default project
 # ============================================================
-echo -e "${YELLOW}Step 5: Setting as Default Project${NC}"
+echo -e "${YELLOW}Step 6: Setting as Default Project${NC}"
 gcloud config set project "$PROJECT_ID"
 echo -e "${GREEN}✓ Default project set to: ${PROJECT_ID}${NC}"
 echo ""
 
 # ============================================================
-# Step 6: Write to .env file
+# Step 7: Write to .env file
 # ============================================================
-echo -e "${YELLOW}Step 6: Saving to .env file${NC}"
+echo -e "${YELLOW}Step 7: Saving to .env file${NC}"
 ENV_FILE=".env"
 ENV_EXAMPLE=".env.example"
 
